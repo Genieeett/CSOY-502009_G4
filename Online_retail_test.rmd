@@ -1,0 +1,181 @@
+includes columns:
+InvoiceNo (transaction ID)
+StockCode (product arm)
+Description
+Quantity
+InvoiceDate
+UnitPrice
+CustomerID
+Country
+
+
+
+### 1 pre
+```{r}
+library(readxl)
+df <- read_excel("Online Retail.xlsx")
+str(df); summary(df)
+```
+
+```{r}
+# 1. Remove cancelled orders (InvoiceNo starting with “C”)
+df <- df[!grepl("^C", df$InvoiceNo), ]
+
+# 2. Drop missing CustomerID
+df <- df[!is.na(df$CustomerID), ]
+
+# 3. Remove zero or negative quantities
+df <- df[df$Quantity > 0, ]
+
+# 4. Remove zero or negative prices
+df <- df[df$UnitPrice > 0, ]
+```
+
+
+```{r}
+# 5. Convert to proper types
+df$InvoiceDate <- as.POSIXct(df$InvoiceDate, format="%Y-%m-%d %H:%M:%S")
+df$StockCode   <- as.factor(df$StockCode)
+
+# 6. (Optional) Focus on one country for consistency
+df <- subset(df, Country == "United Kingdom")
+
+# 7. (Optional) Restrict to a date range
+df <- subset(df, InvoiceDate >= "2010-12-01" & InvoiceDate < "2011-12-01")
+```
+
+```{r}
+topK <- names(head(sort(table(df$StockCode), decreasing=TRUE), 10))
+df   <- df[df$StockCode %in% topK, ]
+```
+
+```{r}
+# Assign each transaction a “round” index by time
+df <- df[order(df$InvoiceDate), ]
+df$round <- seq_len(nrow(df))
+
+# Reward = 1 (purchase happened).  
+# If you want a binary reward per user‐session, aggregate first.
+df$reward <- 1L
+
+bandit_log <- df[, c("round", "StockCode", "reward")]
+names(bandit_log) <- c("round", "arm", "reward")
+```
+
+```{r}
+# Make sure arm is a factor and convert to numeric index
+bandit_log$arm <- as.factor(bandit_log$arm)
+bandit_log$arm_index <- as.numeric(bandit_log$arm)  # gives 1, 2, ..., K
+
+K <- length(levels(bandit_log$arm))
+n <- nrow(bandit_log)
+```
+
+### 2 test
+```{r}
+# Simulate probabilistic rewards for each arm
+set.seed(502009)
+arm_probs <- runif(length(unique(bandit_log$arm)), 0.1, 0.9)
+names(arm_probs) <- unique(bandit_log$arm)
+
+# Apply simulated binary reward
+bandit_log$reward <- rbinom(nrow(bandit_log), 1, arm_probs[bandit_log$arm])
+```
+
+#### UCB
+```{r}
+K <- length(unique(bandit_log$arm))
+n <- nrow(bandit_log)
+counts <- rep(0, K)
+values <- rep(0, K)
+rewards_ucb <- numeric(n)
+
+for (t in 1:n) {
+  ucb_values <- ifelse(
+    counts == 0, Inf,
+    values + sqrt(2 * log(t) / counts)
+  )
+  chosen_arm <- which.max(ucb_values)
+  
+  reward <- bandit_log$reward[t]
+  counts[chosen_arm] <- counts[chosen_arm] + 1
+  values[chosen_arm] <- values[chosen_arm] + (reward - values[chosen_arm]) / counts[chosen_arm]
+  
+  rewards_ucb[t] <- reward
+}
+```
+
+#### ETC 
+```{r}
+explore_rounds <- 100
+counts <- rep(0, K)
+values <- rep(0, K)
+rewards_etc <- numeric(n)
+
+for (t in 1:n) {
+  if (t <= explore_rounds * K) {
+    # Explore each arm in order
+    chosen_arm <- ((t - 1) %% K) + 1
+  } else {
+    # Commit to the best arm
+    chosen_arm <- which.max(values)
+  }
+
+  # Simulate reward from true arm probability
+  reward <- rbinom(1, 1, arm_probs[chosen_arm])
+
+  # Update counts and estimated value
+  counts[chosen_arm] <- counts[chosen_arm] + 1
+  values[chosen_arm] <- values[chosen_arm] + 
+    (reward - values[chosen_arm]) / counts[chosen_arm]
+  rewards_etc[t] <- reward
+}
+```
+
+#### Thompson sampling
+```{r}
+alpha <- rep(1, K)
+beta <- rep(1, K)
+rewards_ts <- numeric(n)
+
+for (t in 1:n) {
+  samples <- rbeta(K, alpha, beta)
+  chosen_arm <- which.max(samples)
+
+  if (is.na(chosen_arm) || chosen_arm < 1 || chosen_arm > K) {
+    stop("Invalid arm index at t = ", t)
+  }
+
+  reward <- rbinom(1, 1, arm_probs[chosen_arm])
+  
+  # Safety check
+  stopifnot(!is.na(reward))
+
+  if (reward == 1) {
+    alpha[chosen_arm] <- alpha[chosen_arm] + 1
+  } else {
+    beta[chosen_arm] <- beta[chosen_arm] + 1
+  }
+
+  rewards_ts[t] <- reward
+}
+```
+
+### 3 compare
+```{r}
+df_compare <- data.frame(
+  round = 1:n,
+  UCB = cumsum(rewards_ucb),
+  ETC = cumsum(rewards_etc),
+  TS = cumsum(rewards_ts)
+)
+
+library(ggplot2)
+df_long <- reshape2::melt(df_compare, id.vars = "round")
+
+ggplot(df_long, aes(x = round, y = value, color = variable)) +
+  geom_line() +
+  labs(title = "Cumulative Reward by Algorithm", y = "Cumulative Reward", color = "Algorithm")
+```
+
+
