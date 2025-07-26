@@ -1,0 +1,48 @@
+---
+title: "Reveal.js Slides"
+author: "Mandy"
+output:
+  revealjs::revealjs_presentation:
+    self_contained: true
+    incremental: true
+    theme: default
+    transition: fade
+---
+
+
+## Slide 1
+
+This is your first slide using `revealjs::revealjs_presentation`.
+
+---
+
+## Slide 2: Bulleted List
+
+- Point one
+- Point two
+- Point three
+
+---
+
+## Slide 3: R Code Chunk
+
+```{r}
+summary(cars)
+
+
+
+```{python}
+print("Hello from Python!")
+```
+
+
+
+---
+
+## ✅ How to Use It in VS Code
+
+1. Save the file as `sample_revealjs_slides.Rmd`
+2. Make sure these packages are installed in R:
+   ```r
+   install.packages("revealjs")
+   install.packages("reticulate")  # if using Python chunks
