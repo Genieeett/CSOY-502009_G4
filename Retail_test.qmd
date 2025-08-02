@@ -1,0 +1,68 @@
+```{python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ——— Load & preprocess ———
+df = pd.read_excel("Online Retail.xlsx", engine="openpyxl")
+df["InvoiceNo"] = df["InvoiceNo"].astype(str)
+df = df[~df["InvoiceNo"].str.startswith("C")]
+df = df.dropna(subset=["CustomerID"])
+df = df[df["Quantity"] > 0]
+df = df[df["UnitPrice"] > 0]
+df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"])
+df["StockCode"]   = df["StockCode"].astype("category")
+df = df[df["Country"] == "United Kingdom"]
+df = df[(df["InvoiceDate"] >= "2010-12-01") & (df["InvoiceDate"] < "2011-12-01")]
+topK = df["StockCode"].value_counts().nlargest(10).index
+df   = df[df["StockCode"].isin(topK)]
+df = df.sort_values("InvoiceDate").reset_index(drop=True)
+df["round"]     = np.arange(len(df)) + 1
+df["arm"], arm_labels = pd.factorize(df["StockCode"])
+df["reward"] = 1
+bandit_log = df[["round","arm","reward"]]
+K = len(arm_labels)
+n = len(bandit_log)
+
+# ——— Simulate & run algorithms ———
+np.random.seed(502009)
+arm_probs = np.random.uniform(0.1, 0.9, size=K)
+bandit_log["reward"] = np.random.binomial(1, arm_probs[bandit_log["arm"]])
+
+# UCB
+counts_ucb = np.zeros(K, int); values_ucb = np.zeros(K)
+rewards_ucb = np.zeros(n, int)
+for t in range(1, n+1):
+    ucb = np.where(counts_ucb==0, np.inf, values_ucb+np.sqrt(2*np.log(t)/counts_ucb))
+    a = np.argmax(ucb); r = bandit_log.loc[t-1,"reward"]
+    counts_ucb[a] += 1
+    values_ucb[a] += (r-values_ucb[a])/counts_ucb[a]
+    rewards_ucb[t-1] = r
+
+# ETC
+m = 100
+counts_etc = np.zeros(K, int); values_etc = np.zeros(K)
+rewards_etc = np.zeros(n, int)
+for t in range(1, n+1):
+    a = (t-1)%K if t<=m*K else np.argmax(values_etc)
+    r = np.random.binomial(1, arm_probs[a])
+    counts_etc[a] += 1
+    values_etc[a] += (r-values_etc[a])/counts_etc[a]
+    rewards_etc[t-1] = r
+
+# Thompson Sampling
+alpha, beta = np.ones(K), np.ones(K)
+rewards_ts = np.zeros(n, int)
+for t in range(n):
+    a = np.argmax(np.random.beta(alpha, beta))
+    r = np.random.binomial(1, arm_probs[a])
+    alpha[a] += r; beta[a] += (1-r)
+    rewards_ts[t] = r
+
+# ——— Plot ———
+plt.plot(np.cumsum(rewards_ucb), label="UCB")
+plt.plot(np.cumsum(rewards_etc), label="ETC")
+plt.plot(np.cumsum(rewards_ts),  label="Thompson")
+plt.xlabel("Round"); plt.ylabel("Cumulative Reward")
+plt.legend(); plt.show()
+```
