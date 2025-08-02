@@ -60,6 +60,10 @@ df$reward <- 1L
 
 bandit_log <- df[, c("round", "StockCode", "reward")]
 names(bandit_log) <- c("round", "arm", "reward")
+
+bandit_log$arm <- droplevels(factor(bandit_log$arm))
+K <- nlevels(bandit_log$arm)
+n <- nrow(bandit_log)
 ```
 
 ```{r}
@@ -75,17 +79,19 @@ n <- nrow(bandit_log)
 ```{r}
 # Simulate probabilistic rewards for each arm
 set.seed(502009)
-arm_probs <- runif(length(unique(bandit_log$arm)), 0.1, 0.9)
-names(arm_probs) <- unique(bandit_log$arm)
 
-# Apply simulated binary reward
-bandit_log$reward <- rbinom(nrow(bandit_log), 1, arm_probs[bandit_log$arm])
+
+arms <- levels(bandit_log$arm)            
+arm_probs <- setNames(runif(length(arms), 0.1, 0.9), arms)
+
+p_vec <- arm_probs[ as.character(bandit_log$arm) ]
+stopifnot(!any(is.na(p_vec)))
+
+bandit_log$reward <- rbinom(nrow(bandit_log), 1, p_vec)
 ```
 
 #### UCB
 ```{r}
-K <- length(unique(bandit_log$arm))
-n <- nrow(bandit_log)
 counts <- rep(0, K)
 values <- rep(0, K)
 rewards_ucb <- numeric(n)
@@ -96,11 +102,12 @@ for (t in 1:n) {
     values + sqrt(2 * log(t) / counts)
   )
   chosen_arm <- which.max(ucb_values)
-  
-  reward <- bandit_log$reward[t]
+
+
+  reward <- rbinom(1, 1, arm_probs[chosen_arm])
+
   counts[chosen_arm] <- counts[chosen_arm] + 1
   values[chosen_arm] <- values[chosen_arm] + (reward - values[chosen_arm]) / counts[chosen_arm]
-  
   rewards_ucb[t] <- reward
 }
 ```
@@ -163,19 +170,58 @@ for (t in 1:n) {
 
 ### 3 compare
 ```{r}
+if (!requireNamespace("ggrepel", quietly = TRUE)) install.packages("ggrepel")
+library(ggrepel)
+library(scales)
+
+if (!requireNamespace("tidyr", quietly = TRUE)) install.packages("tidyr")
+library(tidyr)
+
+if (!requireNamespace("dplyr", quietly = TRUE)) install.packages("dplyr")
+library(dplyr)
+
 df_compare <- data.frame(
   round = 1:n,
   UCB = cumsum(rewards_ucb),
   ETC = cumsum(rewards_etc),
-  TS = cumsum(rewards_ts)
+  TS  = cumsum(rewards_ts)
 )
 
-library(ggplot2)
-df_long <- reshape2::melt(df_compare, id.vars = "round")
+df_long <- data.frame(
+  round = rep(df_compare$round, 3),
+  Algorithm = factor(rep(c("UCB","ETC","TS"), each = n),
+                     levels = c("UCB","ETC","TS")),
+  CumulativeReward = c(df_compare$UCB, df_compare$ETC, df_compare$TS)
+)
 
-ggplot(df_long, aes(x = round, y = value, color = variable)) +
-  geom_line() +
-  labs(title = "Cumulative Reward by Algorithm", y = "Cumulative Reward", color = "Algorithm")
+end_vals <- df_long %>%
+  group_by(Algorithm) %>%
+  filter(round == max(round)) 
+df_long <- df_compare |>
+  pivot_longer(-round, names_to = "Algorithm", values_to = "CumulativeReward") |>
+  drop_na()
+
+end_vals <- df_long |>
+  group_by(Algorithm) |>
+  slice_max(round, n = 1)
+
+ggplot(df_long, aes(round, CumulativeReward, color = Algorithm)) +
+  geom_line(linewidth = 0.7, na.rm = TRUE) +
+  geom_vline(xintercept = explore_rounds * K, linetype = 2) +
+  geom_label_repel(
+    data = end_vals,
+    aes(label = comma(CumulativeReward, accuracy = 1)),
+    size = 3, show.legend = FALSE
+  ) +
+  scale_x_continuous(labels = label_comma()) +
+  scale_y_continuous(labels = label_comma()) +
+  labs(
+    title = "Cumulative Reward by Algorithm",
+    subtitle = paste0("Dashed line = end of ETC exploration (", explore_rounds, " × ", K, " rounds)"),
+    x = "round", y = "Cumulative Reward"
+  ) +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank())
 ```
 
 
