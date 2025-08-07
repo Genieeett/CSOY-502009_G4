@@ -29,7 +29,7 @@ Choose one of the following:
 
     - Public health 
     https://www.kaggle.com/datasets/cdc/behavioral-risk-factor-surveillance-system/data
-    
+
     - Air pollution
     https://www.kaggle.com/datasets/sogun3/uspollution/data
     https://aqs.epa.gov/aqsweb/airdata/download_files.html
@@ -53,5 +53,14 @@ Choose one of the following:
 ## Research Methods
 
 - Horizontal comparison of the effectiveness of different methods
+    - 要做很多重复实验，去横向对比
+横向做很多次试验，对比ETC UCB TS。需要大量时间成本去进行运行和调试。
 
 - Adjusting one of the algorithms to maximize its effectiveness
+    - 需要研究更深层的理论
+纵向做深度研究
+现在学的是offline evaluation
+更深一步可以去做offline policy evaluation
+可以使用Inverse Propensity Score (IPS)、Doubly Robust (DR)等办法
+（类似于supervised learning里面的用历史数据评估模型（like split 80% for learning, 20% for testing）
+
